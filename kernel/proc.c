@@ -295,6 +295,8 @@ fork(void)
 
   np->state = RUNNABLE;
 
+  np->mask=p->mask;
+
   release(&np->lock);
 
   return pid;
@@ -692,4 +694,16 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+
+int
+sysinfo_get_nproc(void){
+  int count=0;
+  for(int i=0;i<NPROC;i++){
+    acquire(&proc[i].lock);
+    if(proc[i].state!=UNUSED) count++;
+    release(&proc[i].lock);
+  }
+  return count;
 }
