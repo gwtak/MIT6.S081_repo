@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -132,7 +134,7 @@ kvmpa(uint64 va)
   pte_t *pte;
   uint64 pa;
   
-  pte = walk(kernel_pagetable, va, 0);
+  pte = walk(myproc()->user_kernel_pagetable, va, 0);
   if(pte == 0)
     panic("kvmpa");
   if((*pte & PTE_V) == 0)
@@ -441,7 +443,8 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   }
 }
 
-void _vmprint(pagetable_t pagetable,int level){
+void 
+_vmprint(pagetable_t pagetable,int level){
   if(level>3) return;
   for(int i=0;i<512;i++){
     pte_t pte=pagetable[i];
@@ -457,7 +460,55 @@ void _vmprint(pagetable_t pagetable,int level){
   }
 }
 
-void vmprint(pagetable_t pagetable){
+void 
+vmprint(pagetable_t pagetable){
   printf("page table %p\n",pagetable);
   _vmprint(pagetable,1);
+}
+
+void
+user_kvmmap(pagetable_t user_kernel_pagetable,uint64 va, uint64 pa, uint64 sz, int perm)
+{
+  if(mappages(user_kernel_pagetable, va, sz, pa, perm) != 0)
+    panic("user_kvmmap");
+}
+
+pagetable_t 
+user_kvminit(){
+  pagetable_t ptr = uvmcreate();
+  if(ptr==0) return 0;
+
+  user_kvmmap(ptr, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+
+  user_kvmmap(ptr, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+
+  user_kvmmap(ptr, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+
+  user_kvmmap(ptr, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+
+  user_kvmmap(ptr, KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
+
+  user_kvmmap(ptr, (uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
+
+  user_kvmmap(ptr, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+
+  return ptr;
+}
+
+void
+free_user_kernel_pagetable(pagetable_t pagetable){
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V)){
+      pagetable[i] = 0;
+      if ((pte & (PTE_R|PTE_W|PTE_X)) == 0)
+      {
+        uint64 child = PTE2PA(pte);
+        free_user_kernel_pagetable((pagetable_t)child);
+      }
+    } else if(pte & PTE_V){
+      panic("proc free kpt: leaf");
+    }
+  }
+  kfree((void*)pagetable);
 }
