@@ -65,6 +65,34 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if(r_scause() == 13 || r_scause() == 15){
+    //页面中断
+
+    /****************直接使用uvmalloc*****************/
+    uint64 page = r_stval();
+    uint64 sz = p->sz;
+    uint64 n = sz-page;
+    page = PGROUNDDOWN(page);
+    if(uvmalloc(p->pagetable, page, page + n) == 0) printf("uvmalloc error\n");
+    /************************************************/
+
+    /**************将uvmalloc的代码拿出来***********
+    uint64 va = r_stval();
+    uint64 ka = (uint64) kalloc();
+    if (ka == 0) p->killed = -1;
+    else
+    {
+      memset((void*)ka, 0, PGSIZE);
+      va = PGROUNDDOWN(va);
+      printf("va = %p, ka = %p\n", va, ka);
+      if (mappages(p->pagetable, va, PGSIZE, ka, PTE_U | PTE_W| PTE_R) != 0)
+      {
+        printf("***********va = %p, ka = %p\n", va, ka);
+        kfree((void*)ka);
+        p->killed = -1;
+      }
+    }
+    ************************************************/
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
